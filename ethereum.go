@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
-	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -20,6 +21,7 @@ func main() {
 	publicKey := privateKey.Public()
 	publicKeyECDSA, _ := publicKey.(*ecdsa.PublicKey)
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	toAddress := common.HexToAddress("0xb8c35efdbca898b8dcde1ffd4ccab66e44c7dd41")
 
 	fmt.Println("================================================================================")
 	fmt.Println("Account Information")
@@ -28,6 +30,7 @@ func main() {
 	fmt.Printf("Private Key: %s\n", privateKeyHex)
 	fmt.Printf("Public Key: %x\n", crypto.FromECDSAPub(publicKeyECDSA))
 
+	// client, err := ethclient.Dial("https://rpc.chiadochain.net")
 	client, err := ethclient.Dial("http://127.0.0.1:8545")
 	if err != nil {
 		fmt.Printf("Failed to connect to client: %v\n", err)
@@ -76,7 +79,6 @@ func main() {
 	fmt.Printf("\nSuggested Gas Price: %s wei (%s Gwei)\n", gasPrice.String(), gasPriceGwei.String())
 
 	// 트랜잭션 생성
-	toAddress := common.HexToAddress("0xb8c35efdbca898b8dcde1ffd4ccab66e44c7dd41")
 
 	fmt.Println("\n================================================================================")
 	fmt.Println("To Address Balance & Details")
@@ -95,7 +97,7 @@ func main() {
 		fmt.Printf("Contract Code Length: %d bytes\n", len(toCode))
 	}
 
-	value := big.NewInt(10000) // 1 ETH in wei
+	value := big.NewInt(30003) // 1 ETH in wei
 	valueEth := new(big.Float).Quo(new(big.Float).SetInt(value), big.NewFloat(1e18))
 	gasLimit := uint64(21000) // 기본 전송
 
@@ -179,7 +181,7 @@ func main() {
 	fmt.Println("================================================================================")
 
 	// Receipt 대기 (선택적)
-	receipt, err := waitForReceipt(client, signedTx.Hash(), 30)
+	receipt, err := waitForReceipt(client, signedTx.Hash(), 3000000)
 	if err != nil {
 		fmt.Printf("⚠️  Could not get receipt: %v\n", err)
 		fmt.Println("(Transaction may still be pending)")
@@ -231,22 +233,47 @@ func main() {
 
 // waitForReceipt waits for a transaction receipt with timeout
 func waitForReceipt(client *ethclient.Client, txHash common.Hash, timeoutSeconds int) (*types.Receipt, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
-	defer cancel()
+	client, err := ethclient.Dial("ws://127.0.0.1:8545")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	query := ethereum.TransactionReceiptsQuery{
+		TransactionHashes: []common.Hash{txHash},
+	}
+
+	receipts := make(chan []*types.Receipt)
+	sub, err := client.SubscribeTransactionReceipts(context.Background(), &query, receipts)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	for {
 		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("timeout waiting for receipt")
-		case <-ticker.C:
-			receipt, err := client.TransactionReceipt(context.Background(), txHash)
-			if err == nil {
-				return receipt, nil
-			}
-			fmt.Print(".")
+		case err := <-sub.Err():
+			log.Fatal(err)
+		case vLog := <-receipts:
+			fmt.Println(vLog) // pointer to event log
+			return vLog[0], nil
 		}
 	}
+
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	// defer cancel()
+	//
+	// ticker := time.NewTicker(1 * time.Second)
+	// defer ticker.Stop()
+	//
+	// for {
+	// 	select {
+	// 	case <-ctx.Done():
+	// 		return nil, fmt.Errorf("timeout waiting for receipt")
+	// 	case <-ticker.C:
+	// 		receipt, err := client.TransactionReceipt(context.Background(), txHash)
+	// 		if err == nil {
+	// 			return receipt, nil
+	// 		}
+	// 		fmt.Print(".")
+	// 	}
+	// }
 }
